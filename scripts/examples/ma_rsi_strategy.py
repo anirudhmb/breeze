@@ -45,6 +45,8 @@ Configuration:
 
 import sys
 import os
+import csv
+import logging
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
@@ -72,13 +74,20 @@ class MAStrategyRunner:
         self.config = self._load_config(config_path)
         self.trader = None
         self.cache_dir = Path(self.config['strategy']['data']['cache_directory'])
+        self.log_dir = Path('logs')
+        self.run_timestamp = datetime.now()
         
         # Position tracking: {stock: {'in_position': bool, 'position_type': 'LONG'/'SHORT', 'entry_price': float}}
         self.positions = {}
+        self.position_history = []  # Track all position changes
         
-        # Create cache directory if enabled
+        # Create directories
         if self.config['strategy']['data']['cache_enabled']:
             self.cache_dir.mkdir(exist_ok=True)
+        self.log_dir.mkdir(exist_ok=True)
+        
+        # Setup logging
+        self._setup_logging()
     
     def _load_config(self, config_path: str) -> Dict:
         """Load strategy configuration from YAML file."""
@@ -95,13 +104,69 @@ class MAStrategyRunner:
         
         return config
     
+    def _setup_logging(self) -> None:
+        """Setup logging to both file and console."""
+        date_str = self.run_timestamp.strftime('%Y-%m-%d')
+        
+        # Full debug log file
+        log_file = self.log_dir / f"full_{date_str}.log"
+        
+        # Configure logging
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S',
+            handlers=[
+                logging.FileHandler(log_file),
+                logging.StreamHandler()
+            ]
+        )
+        
+        self.logger = logging.getLogger(__name__)
+        
+        # Signal CSV logger (clean log)
+        self.signal_log_file = self.log_dir / f"signals_{date_str}.csv"
+        self._init_signal_log()
+    
+    def _init_signal_log(self) -> None:
+        """Initialize signal CSV log file with headers if it doesn't exist."""
+        if not self.signal_log_file.exists():
+            with open(self.signal_log_file, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    'timestamp', 'stock', 'signal', 'position_type', 'price', 'quantity',
+                    'ma_short', 'ma_long', 'rsi_prev', 'rsi_curr', 'reason', 'mode'
+                ])
+    
+    def _log_signal(self, stock: str, signal: str, position_type: str, price: float,
+                   ma_short: float, ma_long: float, rsi_prev: float, rsi_curr: float,
+                   reason: str) -> None:
+        """Log signal to CSV file."""
+        # Only log actual signals (not HOLD)
+        if signal == "HOLD":
+            return
+        
+        quantity = self.config['strategy']['trading']['quantity']
+        mode = self.config['strategy']['mode'].upper()
+        
+        with open(self.signal_log_file, 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                self.run_timestamp.strftime('%Y-%m-%d %H:%M:%S'),
+                stock, signal, position_type, f"{price:.2f}", quantity,
+                f"{ma_short:.2f}", f"{ma_long:.2f}", f"{rsi_prev:.2f}", f"{rsi_curr:.2f}",
+                reason, mode
+            ])
+        
+        self.logger.info(f"✓ Signal logged to {self.signal_log_file.name}")
+    
     def _initialize_trader(self) -> None:
         """Initialize BreezeTrader client."""
         try:
             self.trader = BreezeTrader()
-            print("✓ Connected to Breeze API")
+            self.logger.info("✓ Connected to Breeze API")
         except Exception as e:
-            print(f"✗ Failed to connect to Breeze API: {e}")
+            self.logger.error(f"✗ Failed to connect to Breeze API: {e}")
             raise
     
     def _get_cache_filepath(self, stock: str) -> Path:
@@ -110,13 +175,15 @@ class MAStrategyRunner:
     
     def _load_cached_data(self, stock: str) -> Optional[pd.DataFrame]:
         """
-        Load cached historical data if available and recent.
+        Load cached historical data if available.
+        
+        Note: Cache is kept forever (no expiration) for historical analysis.
         
         Args:
             stock: Stock symbol
             
         Returns:
-            DataFrame with historical data or None if cache invalid
+            DataFrame with ALL historical data or None if cache doesn't exist
         """
         if not self.config['strategy']['data']['cache_enabled']:
             return None
@@ -129,22 +196,16 @@ class MAStrategyRunner:
         try:
             df = pd.read_csv(cache_file, parse_dates=['datetime'])
             
-            # Check if cache is recent (updated today)
             if df.empty:
                 return None
             
             last_date = pd.to_datetime(df['datetime'].max())
-            today = pd.Timestamp.now().normalize()
+            self.logger.info(f"  Cache loaded: {len(df)} rows, latest: {last_date}")
             
-            # If last date is today or yesterday (for weekend), use cache
-            if (today - last_date).days <= 2:
-                return df
-            
-            print(f"  Cache expired (last update: {last_date.date()})")
-            return None
+            return df
             
         except Exception as e:
-            print(f"  Warning: Could not load cache: {e}")
+            self.logger.warning(f"  Could not load cache: {e}")
             return None
     
     def _save_to_cache(self, stock: str, df: pd.DataFrame) -> None:
@@ -161,82 +222,117 @@ class MAStrategyRunner:
     
     def _fetch_historical_data(self, stock: str) -> pd.DataFrame:
         """
-        Fetch historical data from Breeze API or cache.
+        Fetch historical data with incremental updates.
+        
+        Strategy:
+        - If cache exists: Fetch only new data since last update
+        - If no cache: Fetch initial 60 days
+        - Keep ALL data in cache (no trimming)
+        - Use only last 30 days for indicator calculation
         
         Args:
             stock: Stock symbol
             
         Returns:
-            DataFrame with OHLCV data
+            DataFrame with ALL historical OHLCV data
         """
-        # Try to load from cache first
-        df = self._load_cached_data(stock)
-        if df is not None:
-            print(f"  ✓ Loaded from cache ({len(df)} days)")
-            return df
-        
-        # Fetch from API
-        days = self.config['strategy']['data']['days_to_fetch']
         interval = self.config['strategy']['data']['interval']
         exchange = self.config['strategy']['trading']['exchange']
         
-        # Calculate date range
-        to_date = datetime.now()
-        from_date = to_date - timedelta(days=days + 10)  # Extra buffer for holidays
+        # Try to load existing cache
+        cached_df = self._load_cached_data(stock)
         
-        try:
-            print(f"  Fetching data from Breeze API...")
-            print(f"  Parameters: stock={stock}, exchange={exchange}, interval={interval}")
-            print(f"  Date range: {from_date.strftime('%Y-%m-%d')} to {to_date.strftime('%Y-%m-%d')}")
+        if cached_df is not None:
+            # Cache exists - do incremental update
+            last_datetime = cached_df['datetime'].max()
+            self.logger.info(f"  Fetching new data since {last_datetime}...")
             
-            data = self.trader.get_historical_data(
-                stock=stock,
-                interval=interval,
-                from_date=from_date.strftime("%Y-%m-%d"),
-                to_date=to_date.strftime("%Y-%m-%d"),
-                exchange_code=exchange
-            )
+            # Fetch only recent data (last few candles)
+            to_date = datetime.now()
+            from_date = last_datetime
             
-            if not data or len(data) == 0:
-                print(f"  ✗ API returned empty data for {stock}")
-                print(f"  💡 Try:")
-                print(f"     1. Different stock symbol (check exact symbol on ICICI)")
-                print(f"     2. Different exchange (BSE instead of NSE)")
-                print(f"     3. Shorter date range (10 days)")
-                print(f"     4. Run 'python scripts/login.py' if session expired")
-                raise ValueError(f"No data returned from API for {stock}")
+            try:
+                new_data = self.trader.get_historical_data(
+                    stock=stock,
+                    interval=interval,
+                    from_date=from_date.strftime("%Y-%m-%d"),
+                    to_date=to_date.strftime("%Y-%m-%d"),
+                    exchange_code=exchange
+                )
+                
+                if new_data and len(new_data) > 0:
+                    # Convert and append new data
+                    new_df = pd.DataFrame(new_data)
+                    new_df['datetime'] = pd.to_datetime(new_df['datetime'])
+                    
+                    for col in ['open', 'high', 'low', 'close', 'volume']:
+                        if col in new_df.columns:
+                            new_df[col] = pd.to_numeric(new_df[col], errors='coerce')
+                    
+                    # Append to cache (avoiding duplicates)
+                    combined_df = pd.concat([cached_df, new_df], ignore_index=True)
+                    combined_df = combined_df.drop_duplicates(subset=['datetime'], keep='last')
+                    combined_df = combined_df.sort_values('datetime').reset_index(drop=True)
+                    
+                    # Save updated cache
+                    self._save_to_cache(stock, combined_df)
+                    
+                    self.logger.info(f"  ✓ Added {len(new_df)} new candles. Total: {len(combined_df)} rows")
+                    return combined_df
+                else:
+                    self.logger.info(f"  No new data available. Using cache ({len(cached_df)} rows)")
+                    return cached_df
+                    
+            except Exception as e:
+                self.logger.warning(f"  Could not fetch new data: {e}")
+                self.logger.info(f"  Using existing cache ({len(cached_df)} rows)")
+                return cached_df
+        
+        else:
+            # No cache - fetch initial data
+            days = self.config['strategy']['data']['days_to_fetch']
+            to_date = datetime.now()
+            from_date = to_date - timedelta(days=days + 10)
             
-            # Convert to DataFrame
-            df = pd.DataFrame(data)
+            self.logger.info(f"  No cache. Fetching initial {days} days...")
+            self.logger.info(f"  Parameters: stock={stock}, exchange={exchange}, interval={interval}")
+            self.logger.info(f"  Date range: {from_date.strftime('%Y-%m-%d')} to {to_date.strftime('%Y-%m-%d')}")
             
-            # Parse datetime
-            if 'datetime' in df.columns:
+            try:
+                data = self.trader.get_historical_data(
+                    stock=stock,
+                    interval=interval,
+                    from_date=from_date.strftime("%Y-%m-%d"),
+                    to_date=to_date.strftime("%Y-%m-%d"),
+                    exchange_code=exchange
+                )
+                
+                if not data or len(data) == 0:
+                    self.logger.error(f"  ✗ API returned empty data for {stock}")
+                    self.logger.info(f"  💡 Try: Different stock symbol, exchange, or check session")
+                    raise ValueError(f"No data returned from API for {stock}")
+                
+                # Convert to DataFrame
+                df = pd.DataFrame(data)
                 df['datetime'] = pd.to_datetime(df['datetime'])
-            
-            # Ensure numeric columns
-            for col in ['open', 'high', 'low', 'close', 'volume']:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
-            
-            # Sort by date
-            df = df.sort_values('datetime').reset_index(drop=True)
-            
-            # Save to cache
-            self._save_to_cache(stock, df)
-            
-            print(f"  ✓ Fetched {len(df)} days of data")
-            return df
-            
-        except ValueError as e:
-            # Re-raise ValueError with suggestions already printed
-            raise
-        except Exception as e:
-            print(f"  ✗ API Error: {type(e).__name__}: {e}")
-            print(f"  💡 Common fixes:")
-            print(f"     1. Session expired: python scripts/login.py")
-            print(f"     2. Check credentials in config.yaml")
-            print(f"     3. Verify internet connection")
-            raise Exception(f"Failed to fetch historical data for {stock}: {e}")
+                
+                for col in ['open', 'high', 'low', 'close', 'volume']:
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors='coerce')
+                
+                df = df.sort_values('datetime').reset_index(drop=True)
+                
+                # Save initial cache
+                self._save_to_cache(stock, df)
+                
+                self.logger.info(f"  ✓ Fetched {len(df)} rows (initial cache created)")
+                return df
+                
+            except ValueError:
+                raise
+            except Exception as e:
+                self.logger.error(f"  ✗ API Error: {type(e).__name__}: {e}")
+                raise Exception(f"Failed to fetch historical data for {stock}: {e}")
     
     def _calculate_sma(self, df: pd.DataFrame, period: int) -> pd.Series:
         """Calculate Simple Moving Average."""
@@ -376,23 +472,47 @@ class MAStrategyRunner:
         """
         Process a single stock: fetch data, calculate indicators, generate signal.
         
+        Strategy: Keep ALL data in cache, calculate on last 30 days only
+        
         Args:
             stock: Stock symbol
         """
-        print(f"\nProcessing {stock}...")
-        print("-" * 60)
+        self.logger.info(f"\nProcessing {stock}...")
+        self.logger.info("-" * 60)
         
         try:
-            # Fetch historical data
-            df = self._fetch_historical_data(stock)
+            # Fetch ALL historical data (incremental)
+            df_all = self._fetch_historical_data(stock)
             
-            if len(df) < self.config['strategy']['indicators']['ma_long'] + 1:
-                print(f"  ✗ Insufficient data ({len(df)} days)")
+            # Use only LAST 30 days for indicator calculation
+            days_to_use = 30
+            ma_long_period = self.config['strategy']['indicators']['ma_long']
+            
+            # Calculate how many rows we need (30 days, accounting for minute data)
+            if '5minute' in self.config['strategy']['data']['interval']:
+                # For 5min data: ~78 candles per day (6.5 trading hours * 12 candles/hour)
+                rows_needed = days_to_use * 78
+            elif '1minute' in self.config['strategy']['data']['interval']:
+                rows_needed = days_to_use * 390  # 390 minutes per trading day
+            else:
+                # For daily data
+                rows_needed = days_to_use
+            
+            # Take last N rows
+            if len(df_all) > rows_needed:
+                df = df_all.tail(rows_needed).copy()
+                self.logger.info(f"  Using last {len(df)} rows ({days_to_use} days) from {len(df_all)} total")
+            else:
+                df = df_all.copy()
+                self.logger.info(f"  Using all {len(df)} rows available")
+            
+            # Check sufficient data
+            if len(df) < ma_long_period + 1:
+                self.logger.warning(f"  ✗ Insufficient data for indicators ({len(df)} rows)")
                 return
             
-            # Calculate indicators
+            # Calculate indicators on recent data
             ma_short_period = self.config['strategy']['indicators']['ma_short']
-            ma_long_period = self.config['strategy']['indicators']['ma_long']
             rsi_period = self.config['strategy']['indicators']['rsi_period']
             
             df['ma_short'] = self._calculate_sma(df, ma_short_period)
@@ -411,13 +531,13 @@ class MAStrategyRunner:
             
             # Check for NaN values
             if pd.isna(ma_short) or pd.isna(ma_long) or pd.isna(rsi) or pd.isna(prev_rsi):
-                print(f"  ✗ Insufficient data for indicators")
+                self.logger.warning(f"  ✗ Insufficient data for indicators (NaN values)")
                 return
             
             # Display current values
-            print(f"  Latest Close: ₹{current_close:.2f}")
-            print(f"  MA({ma_short_period}): {ma_short:.2f} | MA({ma_long_period}): {ma_long:.2f}")
-            print(f"  RSI({rsi_period}): {rsi:.2f} (prev: {prev_rsi:.2f})")
+            self.logger.info(f"  Latest Close: ₹{current_close:.2f}")
+            self.logger.info(f"  MA({ma_short_period}): {ma_short:.2f} | MA({ma_long_period}): {ma_long:.2f}")
+            self.logger.info(f"  RSI({rsi_period}): {rsi:.2f} (prev: {prev_rsi:.2f})")
             
             # Check position status
             in_position = self.positions.get(stock, {}).get('in_position', False)
@@ -434,9 +554,9 @@ class MAStrategyRunner:
                     pnl = 0
                 
                 pnl_pct = (pnl / entry_price) * 100
-                print(f"  Position: {position_type} @ ₹{entry_price:.2f} | P&L: ₹{pnl:.2f} ({pnl_pct:+.2f}%)")
+                self.logger.info(f"  Position: {position_type} @ ₹{entry_price:.2f} | P&L: ₹{pnl:.2f} ({pnl_pct:+.2f}%)")
             else:
-                print(f"  Position: NONE")
+                self.logger.info(f"  Position: NONE")
                 position_type = None
             
             # Generate signal
@@ -444,13 +564,28 @@ class MAStrategyRunner:
                 ma_short, ma_long, rsi, prev_rsi, current_close, position_type
             )
             
-            print(f"  Signal: {signal} ({reason})")
+            self.logger.info(f"  Signal: {signal} ({reason})")
+            
+            # Log signal to CSV (only if not HOLD)
+            if signal != "HOLD":
+                # Determine position type for log (what position type WILL be after this signal)
+                if signal == "BUY":
+                    log_position_type = "LONG"
+                elif signal == "SHORT":
+                    log_position_type = "SHORT"
+                elif signal in ["SELL", "COVER"]:
+                    log_position_type = "NONE"
+                else:
+                    log_position_type = position_type or "NONE"
+                
+                self._log_signal(stock, signal, log_position_type, current_close,
+                                ma_short, ma_long, prev_rsi, rsi, reason)
             
             # Execute or simulate order
             self._execute_signal(stock, signal, current_close)
             
         except Exception as e:
-            print(f"  ✗ Error processing {stock}: {e}")
+            self.logger.error(f"  ✗ Error processing {stock}: {e}")
     
     def _execute_signal(self, stock: str, signal: str, current_price: float) -> None:
         """
@@ -508,7 +643,8 @@ class MAStrategyRunner:
                 self.positions[stock] = {
                     'in_position': True,
                     'position_type': 'LONG',
-                    'entry_price': current_price
+                    'entry_price': current_price,
+                    'entry_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 }
                 print(f"               Entry Price: ₹{current_price:.2f}")
                 
@@ -528,7 +664,8 @@ class MAStrategyRunner:
                 self.positions[stock] = {
                     'in_position': True,
                     'position_type': 'SHORT',
-                    'entry_price': current_price
+                    'entry_price': current_price,
+                    'entry_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 }
                 print(f"               Entry Price: ₹{current_price:.2f}")
                 
@@ -593,7 +730,8 @@ class MAStrategyRunner:
                         self.positions[stock] = {
                             'in_position': True,
                             'position_type': 'LONG',
-                            'entry_price': current_price
+                            'entry_price': current_price,
+                            'entry_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                         }
                     elif signal == "SELL":
                         entry_price = self.positions[stock]['entry_price']
@@ -609,7 +747,8 @@ class MAStrategyRunner:
                         self.positions[stock] = {
                             'in_position': True,
                             'position_type': 'SHORT',
-                            'entry_price': current_price
+                            'entry_price': current_price,
+                            'entry_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                         }
                     elif signal == "COVER":
                         entry_price = self.positions[stock]['entry_price']
@@ -630,11 +769,69 @@ class MAStrategyRunner:
         else:
             print(f"  ✗ Invalid mode: {mode} (use 'trial' or 'live')")
     
+    def _save_positions_file(self) -> None:
+        """Save current positions to positions.txt for status display."""
+        positions_file = self.log_dir / 'positions.txt'
+        
+        with open(positions_file, 'w') as f:
+            f.write(f"Last Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+            f.write("ACTIVE POSITIONS:\n")
+            f.write("=" * 60 + "\n\n")
+            
+            active_count = 0
+            long_count = 0
+            short_count = 0
+            
+            for stock, pos in self.positions.items():
+                if pos.get('in_position', False):
+                    position_type = pos.get('position_type')
+                    entry_price = pos.get('entry_price', 0)
+                    
+                    f.write(f"{stock}:\n")
+                    f.write(f"  Type: {position_type}\n")
+                    f.write(f"  Entry Price: ₹{entry_price:.2f}\n")
+                    f.write(f"  Entry Time: {pos.get('entry_time', 'N/A')}\n")
+                    f.write("\n")
+                    
+                    active_count += 1
+                    if position_type == "LONG":
+                        long_count += 1
+                    elif position_type == "SHORT":
+                        short_count += 1
+            
+            if active_count == 0:
+                f.write("No active positions\n\n")
+            
+            f.write("=" * 60 + "\n")
+            f.write(f"Total Active: {active_count} position(s)\n")
+            f.write(f"  LONG: {long_count}\n")
+            f.write(f"  SHORT: {short_count}\n")
+    
+    def _save_last_run_file(self, success: bool, stocks_processed: int, signals: int, errors: int) -> None:
+        """Save last run info to last_run.txt for status display."""
+        last_run_file = self.log_dir / 'last_run.txt'
+        
+        end_time = datetime.now()
+        duration = (end_time - self.run_timestamp).total_seconds()
+        
+        with open(last_run_file, 'w') as f:
+            f.write(f"Last Run: {end_time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Status: {'SUCCESS' if success else 'FAILED'}\n")
+            f.write(f"Stocks Processed: {stocks_processed}\n")
+            f.write(f"Signals Generated: {signals}\n")
+            if errors > 0:
+                f.write(f"Errors: {errors}\n")
+            f.write(f"Execution Time: {duration:.1f} seconds\n")
+            
+            # Count active positions
+            active_positions = sum(1 for p in self.positions.values() if p.get('in_position', False))
+            f.write(f"Active Positions: {active_positions}\n")
+    
     def run(self) -> None:
         """Run the trading strategy for all configured stocks."""
-        print("=" * 60)
-        print("  MA + RSI Momentum Strategy (Long & Short)")
-        print("=" * 60)
+        self.logger.info("=" * 60)
+        self.logger.info("  MA + RSI Momentum Strategy (Long & Short)")
+        self.logger.info("=" * 60)
         
         mode = self.config['strategy']['mode'].upper()
         stocks = self.config['strategy']['stocks']
@@ -642,32 +839,49 @@ class MAStrategyRunner:
         rsi_short_entry = self.config['strategy']['indicators']['rsi_short_entry']
         rsi_short_exit = self.config['strategy']['indicators']['rsi_short_exit']
         
-        print(f"\nMode: {mode}")
+        self.logger.info(f"\nMode: {mode}")
         if mode == "TRIAL":
-            print("(No real orders will be placed - position tracking simulated)")
+            self.logger.info("(No real orders will be placed - position tracking simulated)")
         else:
-            print("⚠️  LIVE MODE - Real orders will be executed!")
+            self.logger.info("⚠️  LIVE MODE - Real orders will be executed!")
         
-        print(f"Stocks: {', '.join(stocks)}")
-        print(f"Strategy: Momentum Breakout/Breakdown (Long & Short)")
-        print(f"  LONG Entry: Uptrend + RSI crossing {rsi_long}")
-        print(f"  LONG Exit: Trend reversal OR RSI < 50 OR Price < Long MA")
-        print(f"  SHORT Entry: Downtrend + RSI crossing {rsi_short_entry}")
-        print(f"  SHORT Exit: Trend reversal OR RSI > {rsi_short_exit} OR Price > Long MA")
-        print(f"Indicators: MA({self.config['strategy']['indicators']['ma_short']}/"
+        self.logger.info(f"Stocks: {', '.join(stocks)}")
+        self.logger.info(f"Strategy: Momentum Breakout/Breakdown (Long & Short)")
+        self.logger.info(f"  LONG Entry: Uptrend + RSI crossing {rsi_long}")
+        self.logger.info(f"  LONG Exit: Trend reversal OR RSI < 50 OR Price < Long MA")
+        self.logger.info(f"  SHORT Entry: Downtrend + RSI crossing {rsi_short_entry}")
+        self.logger.info(f"  SHORT Exit: Trend reversal OR RSI > {rsi_short_exit} OR Price > Long MA")
+        self.logger.info(f"Indicators: MA({self.config['strategy']['indicators']['ma_short']}/"
               f"{self.config['strategy']['indicators']['ma_long']}), "
               f"RSI({self.config['strategy']['indicators']['rsi_period']})")
         
-        # Initialize trader
-        self._initialize_trader()
+        # Track stats
+        stocks_processed = 0
+        signals_generated = 0
+        errors = 0
         
-        # Process each stock
-        for stock in stocks:
-            self._process_stock(stock)
+        try:
+            # Initialize trader
+            self._initialize_trader()
+            
+            # Process each stock
+            for stock in stocks:
+                try:
+                    self._process_stock(stock)
+                    stocks_processed += 1
+                except Exception as e:
+                    self.logger.error(f"Error processing {stock}: {e}")
+                    errors += 1
+            
+            success = True
+        except Exception as e:
+            self.logger.error(f"Fatal error: {e}")
+            success = False
+            errors += 1
         
-        print("\n" + "=" * 60)
-        print("  Strategy Run Complete")
-        print("=" * 60)
+        self.logger.info("\n" + "=" * 60)
+        self.logger.info("  Strategy Run Complete")
+        self.logger.info("=" * 60)
         
         # Summary of positions
         long_positions = [stock for stock, pos in self.positions.items() 
@@ -675,20 +889,40 @@ class MAStrategyRunner:
         short_positions = [stock for stock, pos in self.positions.items() 
                           if pos.get('in_position', False) and pos.get('position_type') == 'SHORT']
         
-        print(f"\n📊 Position Summary:")
+        self.logger.info(f"\n📊 Position Summary:")
         if long_positions:
-            print(f"  LONG: {', '.join(long_positions)}")
+            self.logger.info(f"  LONG: {', '.join(long_positions)}")
         if short_positions:
-            print(f"  SHORT: {', '.join(short_positions)}")
+            self.logger.info(f"  SHORT: {', '.join(short_positions)}")
         if not long_positions and not short_positions:
-            print(f"  No active positions")
+            self.logger.info(f"  No active positions")
         
-        print(f"\nData cached in: {self.cache_dir.absolute()}")
-        print("Tip: Edit strategy_config.yaml to customize parameters")
+        self.logger.info(f"\nLogs directory: {self.log_dir.absolute()}")
+        self.logger.info(f"Data cached in: {self.cache_dir.absolute()}")
+        
+        # Save status files
+        self._save_positions_file()
+        self._save_last_run_file(success, stocks_processed, signals_generated, errors)
+        
+        self.logger.info("Status files updated: positions.txt, last_run.txt")
 
 
 def main():
     """Main entry point."""
+    # Check for RUNNING flag file
+    flag_file = Path('breeze_RUNNING.flag')
+    
+    if not flag_file.exists():
+        print("=" * 60)
+        print("  Strategy is STOPPED")
+        print("=" * 60)
+        print("\nThe strategy is currently disabled.")
+        print("Flag file 'breeze_RUNNING.flag' not found.")
+        print("\nTo start the strategy:")
+        print("  Double-click: START_Strategy.bat")
+        print()
+        sys.exit(0)
+    
     try:
         runner = MAStrategyRunner()
         runner.run()
