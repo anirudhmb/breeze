@@ -175,6 +175,8 @@ class MAStrategyRunner:
         
         try:
             print(f"  Fetching data from Breeze API...")
+            print(f"  Parameters: stock={stock}, exchange={exchange}, interval={interval}")
+            print(f"  Date range: {from_date.strftime('%Y-%m-%d')} to {to_date.strftime('%Y-%m-%d')}")
             
             data = self.trader.get_historical_data(
                 stock=stock,
@@ -185,7 +187,13 @@ class MAStrategyRunner:
             )
             
             if not data or len(data) == 0:
-                raise ValueError("No data returned from API")
+                print(f"  ✗ API returned empty data for {stock}")
+                print(f"  💡 Try:")
+                print(f"     1. Different stock symbol (check exact symbol on ICICI)")
+                print(f"     2. Different exchange (BSE instead of NSE)")
+                print(f"     3. Shorter date range (10 days)")
+                print(f"     4. Run 'python scripts/login.py' if session expired")
+                raise ValueError(f"No data returned from API for {stock}")
             
             # Convert to DataFrame
             df = pd.DataFrame(data)
@@ -208,8 +216,16 @@ class MAStrategyRunner:
             print(f"  ✓ Fetched {len(df)} days of data")
             return df
             
+        except ValueError as e:
+            # Re-raise ValueError with suggestions already printed
+            raise
         except Exception as e:
-            raise Exception(f"Failed to fetch historical data: {e}")
+            print(f"  ✗ API Error: {type(e).__name__}: {e}")
+            print(f"  💡 Common fixes:")
+            print(f"     1. Session expired: python scripts/login.py")
+            print(f"     2. Check credentials in config.yaml")
+            print(f"     3. Verify internet connection")
+            raise Exception(f"Failed to fetch historical data for {stock}: {e}")
     
     def _calculate_sma(self, df: pd.DataFrame, period: int) -> pd.Series:
         """Calculate Simple Moving Average."""
