@@ -30,7 +30,18 @@ Method 2: Press Windows Key + R → type "cmd" → Enter
 
 Method 3: In File Explorer, click File menu → "Open command prompt"
 
-STEP 2: Login to Breeze (Create Session)
+STEP 2: Activate Virtual Environment
+-------------------------------------
+IMPORTANT: You must activate the virtual environment before running Python:
+
+    venv\Scripts\activate
+
+You should see (venv) appear at the start of your command prompt:
+    (venv) C:\path\to\breeze>
+
+This means Python and all packages are ready to use.
+
+STEP 3: Login to Breeze (Create Session)
 -----------------------------------------
 Run:
     python scripts\login.py
@@ -42,7 +53,7 @@ Follow the prompts:
 
 This creates a session that lasts 24 hours.
 
-STEP 3: Setup Task Scheduler (One-Time Only)
+STEP 4: Setup Task Scheduler (One-Time Only)
 ---------------------------------------------
 Double-click: SETUP_TaskScheduler.bat
 
@@ -71,7 +82,16 @@ MORNING ROUTINE (Before Market Opens - Before 9:00 AM):
    
    ✓ You're now in the correct folder automatically!
 
-2. Login to Breeze (Creates fresh session)
+2. Activate Virtual Environment
+   
+   venv\Scripts\activate
+   
+   You should see (venv) appear:
+   (venv) C:\path\to\breeze>
+   
+   ✓ Virtual environment is active!
+
+3. Login to Breeze (Creates fresh session)
    
    python scripts\login.py
    
@@ -79,7 +99,7 @@ MORNING ROUTINE (Before Market Opens - Before 9:00 AM):
    
    ✓ You should see: "Login successful! Session token saved."
 
-3. Verify Strategy Configuration
+4. Verify Strategy Configuration
    
    - Open: strategy_config.yaml
    - Check mode: 'trial' (for testing) or 'live' (for real trading)
@@ -87,7 +107,7 @@ MORNING ROUTINE (Before Market Opens - Before 9:00 AM):
    
    IMPORTANT: Always start with 'trial' mode first!
 
-4. Start the Strategy
+5. Start the Strategy
    
    Double-click: START_Strategy.bat
    
@@ -171,6 +191,12 @@ EASIEST: Open File Explorer → Go to breeze folder →
 
 Alternative: Windows Key + R → type "cmd" → Enter → cd C:\path\to\breeze
 
+Activate Virtual Environment:
+------------------------------
+venv\Scripts\activate
+
+(You should see "(venv)" appear at the start of your prompt)
+
 Login to Breeze:
 ----------------
 python scripts\login.py
@@ -222,9 +248,14 @@ Solution (EASIEST):
 3. Type "cmd" and press Enter
 4. ✓ Command Prompt opens in the correct folder automatically!
 
-Problem: Python not found
-Solution: Activate virtual environment first:
-    venv\Scripts\activate
+Problem: Python not found or "command not found"
+Solution: 
+1. Make sure you activated the virtual environment:
+   venv\Scripts\activate
+2. You should see (venv) at the start of your prompt
+3. If venv doesn't exist, you need to create it first:
+   python3 -m venv venv
+   venv\Scripts\pip install -r requirements.txt
 
 ================================================================================
                          SAFETY REMINDERS
@@ -241,6 +272,8 @@ Solution: Activate virtual environment first:
                          DAILY CHECKLIST
 ================================================================================
 
+[ ] Morning: Open cmd in project folder (address bar → type "cmd")
+[ ] Morning: Activate venv (venv\Scripts\activate)
 [ ] Morning: Login to Breeze (python scripts\login.py)
 [ ] Morning: Check strategy_config.yaml (mode and stocks)
 [ ] Morning: Start strategy (START_Strategy.bat)

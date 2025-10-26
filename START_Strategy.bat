@@ -31,6 +31,7 @@ echo.
 
 REM Run the strategy once immediately
 cd /d "%~dp0"
+call venv\Scripts\activate.bat
 python scripts\examples\ma_rsi_strategy.py
 
 echo.

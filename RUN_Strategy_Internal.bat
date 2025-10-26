@@ -13,6 +13,7 @@ if not exist "breeze_RUNNING.flag" (
     exit /b 0
 )
 
-REM Flag exists, run the strategy
+REM Flag exists, activate venv and run the strategy
+call venv\Scripts\activate.bat
 python scripts\examples\ma_rsi_strategy.py
 
