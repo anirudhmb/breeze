@@ -12,14 +12,13 @@ echo.
 
 REM Get current directory
 set SCRIPT_DIR=%~dp0
-set PYTHON_SCRIPT=%SCRIPT_DIR%scripts\examples\ma_rsi_strategy.py
+set WRAPPER_SCRIPT=%SCRIPT_DIR%RUN_Strategy_Internal.bat
 
 echo This will create a Windows Task Scheduler job that:
 echo   - Runs every 1 minute
 echo   - Starts at 9:00 AM daily
-echo   - Runs for 7 hours (market hours)
 echo.
-echo Script location: %PYTHON_SCRIPT%
+echo Wrapper script: %WRAPPER_SCRIPT%
 echo.
 
 REM Check if python is available
@@ -48,7 +47,8 @@ echo Creating Task Scheduler job...
 echo.
 
 REM Create the scheduled task
-schtasks /Create /TN "BreezeStrategy" /TR "cmd /c cd /d \"%SCRIPT_DIR%\" && python scripts\examples\ma_rsi_strategy.py" /SC MINUTE /MO 1 /ST 09:00 /F
+REM Using wrapper script to avoid && escaping issues
+schtasks /Create /TN "BreezeStrategy" /TR "\"%WRAPPER_SCRIPT%\"" /SC MINUTE /MO 1 /ST 09:00 /F
 
 if %ERRORLEVEL% EQU 0 (
     echo.
