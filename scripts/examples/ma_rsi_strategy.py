@@ -1,15 +1,28 @@
 #!/usr/bin/env python3
 """
-MA + RSI Trading Strategy
+MA + RSI Momentum Breakout Strategy
 
-A simple config-driven trading strategy using:
-- Moving Average (MA) crossover signals
-- Relative Strength Index (RSI) for confirmation
+A config-driven momentum trading strategy that:
+- Buys when RSI crosses into overbought zone during uptrends (momentum acceleration)
+- Exits when trend reverses, momentum weakens, or support breaks
+- Tracks positions to prevent duplicate entries/exits
+
+Entry Logic (LONG):
+  - Short MA > Long MA (uptrend)
+  - Previous RSI < threshold (e.g., 70)
+  - Current RSI >= threshold (momentum breakout)
+
+Exit Logic (LONG):
+  - Short MA < Long MA (trend reversal) OR
+  - Previous RSI > 50 AND Current RSI < 50 (momentum weakening) OR
+  - Current Close < Long MA (support broken)
 
 Features:
 - Trial/Live mode toggle (safe testing)
+- Position tracking (prevents duplicate buys/sells)
 - Historical data caching (CSV)
 - Multi-stock support
+- P&L tracking
 - Clear signal reporting
 
 Usage:
@@ -48,6 +61,9 @@ class MAStrategyRunner:
         self.config = self._load_config(config_path)
         self.trader = None
         self.cache_dir = Path(self.config['strategy']['data']['cache_directory'])
+        
+        # Position tracking: {stock: {'in_position': bool, 'entry_price': float}}
+        self.positions = {}
         
         # Create cache directory if enabled
         if self.config['strategy']['data']['cache_enabled']:
@@ -235,50 +251,63 @@ class MAStrategyRunner:
         ma_short: float, 
         ma_long: float, 
         rsi: float,
-        prev_ma_short: float,
-        prev_ma_long: float
+        prev_rsi: float,
+        current_close: float
     ) -> Tuple[str, str]:
         """
-        Generate trading signal based on MA crossover and RSI.
+        Generate trading signal based on momentum breakout strategy.
+        
+        LONG ENTRY:
+        - Short MA > Long MA (uptrend)
+        - Previous RSI < overbought threshold
+        - Current RSI >= overbought threshold (momentum accelerating)
+        
+        LONG EXIT (any one triggers):
+        - Short MA < Long MA (trend reversal)
+        - Previous RSI > 50 AND Current RSI < 50 (momentum weakening)
+        - Current Close < Long MA (support broken)
         
         Args:
             ma_short: Current short MA
             ma_long: Current long MA
             rsi: Current RSI
-            prev_ma_short: Previous short MA
-            prev_ma_long: Previous long MA
+            prev_rsi: Previous RSI
+            current_close: Current closing price
             
         Returns:
             Tuple of (signal, reason) where signal is BUY/SELL/HOLD
         """
         rsi_overbought = self.config['strategy']['indicators']['rsi_overbought']
-        rsi_oversold = self.config['strategy']['indicators']['rsi_oversold']
         
-        # Check for MA crossover
-        bullish_crossover = (prev_ma_short <= prev_ma_long) and (ma_short > ma_long)
-        bearish_crossover = (prev_ma_short >= prev_ma_long) and (ma_short < ma_long)
+        # === LONG ENTRY LOGIC ===
+        # BUY when: Uptrend + RSI just crossed into overbought (momentum breakout)
+        uptrend = ma_short > ma_long
+        rsi_breakout = (prev_rsi < rsi_overbought) and (rsi >= rsi_overbought)
         
-        # BUY Signal: Bullish crossover + RSI not overbought
-        if bullish_crossover and rsi < rsi_overbought:
-            return "BUY", "MA bullish crossover, RSI neutral/oversold"
+        if uptrend and rsi_breakout:
+            return "BUY", f"Momentum breakout (RSI: {prev_rsi:.1f}→{rsi:.1f}, crossing {rsi_overbought})"
         
-        # BUY Signal: RSI oversold + MA trend positive
-        if rsi < rsi_oversold and ma_short > ma_long:
-            return "BUY", "RSI oversold, MA trend positive"
+        # === LONG EXIT LOGIC ===
+        # Exit 1: Trend reversal (bearish crossover)
+        trend_reversal = ma_short < ma_long
+        if trend_reversal:
+            return "SELL", "Trend reversal (Short MA < Long MA)"
         
-        # SELL Signal: Bearish crossover
-        if bearish_crossover:
-            return "SELL", "MA bearish crossover"
+        # Exit 2: Momentum weakening (RSI crosses below 50)
+        momentum_weak = (prev_rsi > 50) and (rsi < 50)
+        if momentum_weak:
+            return "SELL", f"Momentum weakening (RSI: {prev_rsi:.1f}→{rsi:.1f}, crossed below 50)"
         
-        # SELL Signal: RSI overbought
-        if rsi > rsi_overbought:
-            return "SELL", "RSI overbought"
+        # Exit 3: Support broken (price below long MA)
+        support_broken = current_close < ma_long
+        if support_broken:
+            return "SELL", f"Support broken (Price: ₹{current_close:.2f} < MA: ₹{ma_long:.2f})"
         
-        # HOLD: No clear signal
-        if ma_short > ma_long:
-            return "HOLD", "Uptrend but no entry signal"
+        # === HOLD ===
+        if uptrend:
+            return "HOLD", "Uptrend but no entry/exit signal"
         else:
-            return "HOLD", "Downtrend or neutral"
+            return "HOLD", "Downtrend, waiting for setup"
     
     def _process_stock(self, stock: str) -> None:
         """
@@ -314,42 +343,64 @@ class MAStrategyRunner:
             ma_short = latest['ma_short']
             ma_long = latest['ma_long']
             rsi = latest['rsi']
-            prev_ma_short = previous['ma_short']
-            prev_ma_long = previous['ma_long']
+            prev_rsi = previous['rsi']
+            current_close = latest['close']
             
             # Check for NaN values
-            if pd.isna(ma_short) or pd.isna(ma_long) or pd.isna(rsi):
+            if pd.isna(ma_short) or pd.isna(ma_long) or pd.isna(rsi) or pd.isna(prev_rsi):
                 print(f"  ✗ Insufficient data for indicators")
                 return
             
             # Display current values
-            print(f"  Latest Close: ₹{latest['close']:.2f}")
+            print(f"  Latest Close: ₹{current_close:.2f}")
             print(f"  MA({ma_short_period}): {ma_short:.2f} | MA({ma_long_period}): {ma_long:.2f}")
-            print(f"  RSI({rsi_period}): {rsi:.2f}")
+            print(f"  RSI({rsi_period}): {rsi:.2f} (prev: {prev_rsi:.2f})")
+            
+            # Check position status
+            in_position = self.positions.get(stock, {}).get('in_position', False)
+            if in_position:
+                entry_price = self.positions[stock]['entry_price']
+                pnl = current_close - entry_price
+                pnl_pct = (pnl / entry_price) * 100
+                print(f"  Position: LONG @ ₹{entry_price:.2f} | P&L: ₹{pnl:.2f} ({pnl_pct:+.2f}%)")
+            else:
+                print(f"  Position: NONE")
             
             # Generate signal
             signal, reason = self._generate_signal(
-                ma_short, ma_long, rsi,
-                prev_ma_short, prev_ma_long
+                ma_short, ma_long, rsi, prev_rsi, current_close
             )
             
             print(f"  Signal: {signal} ({reason})")
             
             # Execute or simulate order
-            self._execute_signal(stock, signal)
+            self._execute_signal(stock, signal, current_close)
             
         except Exception as e:
             print(f"  ✗ Error processing {stock}: {e}")
     
-    def _execute_signal(self, stock: str, signal: str) -> None:
+    def _execute_signal(self, stock: str, signal: str, current_price: float) -> None:
         """
-        Execute trading signal based on mode (trial/live).
+        Execute trading signal based on mode (trial/live) with position tracking.
         
         Args:
             stock: Stock symbol
             signal: Trading signal (BUY/SELL/HOLD)
+            current_price: Current closing price
         """
-        if signal == "HOLD":
+        # Check current position status
+        in_position = self.positions.get(stock, {}).get('in_position', False)
+        
+        # Position tracking logic
+        if signal == "BUY":
+            if in_position:
+                print(f"  → Already in position, skipping BUY signal")
+                return
+        elif signal == "SELL":
+            if not in_position:
+                print(f"  → No position to exit, skipping SELL signal")
+                return
+        elif signal == "HOLD":
             print(f"  → No action taken")
             return
         
@@ -359,9 +410,27 @@ class MAStrategyRunner:
         product = self.config['strategy']['trading']['product']
         
         if mode == "trial":
-            # Trial mode - just print what would happen
+            # Trial mode - just print what would happen and update positions
             print(f"  [TRIAL MODE] Would place: {signal} {stock} qty={quantity}")
             print(f"               Exchange: {exchange}, Product: {product}")
+            
+            # Update position tracking in trial mode
+            if signal == "BUY":
+                self.positions[stock] = {
+                    'in_position': True,
+                    'entry_price': current_price
+                }
+                print(f"               Entry Price: ₹{current_price:.2f}")
+            elif signal == "SELL":
+                entry_price = self.positions[stock]['entry_price']
+                pnl = current_price - entry_price
+                pnl_pct = (pnl / entry_price) * 100
+                print(f"               Exit Price: ₹{current_price:.2f}")
+                print(f"               P&L: ₹{pnl:.2f} ({pnl_pct:+.2f}%)")
+                self.positions[stock] = {
+                    'in_position': False,
+                    'entry_price': 0.0
+                }
         
         elif mode == "live":
             # Live mode - execute actual order
@@ -387,6 +456,22 @@ class MAStrategyRunner:
                 if response.get('Success'):
                     order_id = response['Success'].get('order_id', 'N/A')
                     print(f"  ✓ Order placed successfully (ID: {order_id})")
+                    
+                    # Update position tracking
+                    if signal == "BUY":
+                        self.positions[stock] = {
+                            'in_position': True,
+                            'entry_price': current_price
+                        }
+                    elif signal == "SELL":
+                        entry_price = self.positions[stock]['entry_price']
+                        pnl = current_price - entry_price
+                        pnl_pct = (pnl / entry_price) * 100
+                        print(f"  💰 P&L: ₹{pnl:.2f} ({pnl_pct:+.2f}%)")
+                        self.positions[stock] = {
+                            'in_position': False,
+                            'entry_price': 0.0
+                        }
                 else:
                     print(f"  ✗ Order failed: {response}")
                     
@@ -399,21 +484,25 @@ class MAStrategyRunner:
     def run(self) -> None:
         """Run the trading strategy for all configured stocks."""
         print("=" * 60)
-        print("  MA + RSI Trading Strategy Runner")
+        print("  MA + RSI Momentum Breakout Strategy")
         print("=" * 60)
         
         mode = self.config['strategy']['mode'].upper()
         stocks = self.config['strategy']['stocks']
+        rsi_threshold = self.config['strategy']['indicators']['rsi_overbought']
         
         print(f"\nMode: {mode}")
         if mode == "TRIAL":
-            print("(No real orders will be placed)")
+            print("(No real orders will be placed - position tracking simulated)")
         else:
             print("⚠️  LIVE MODE - Real orders will be executed!")
         
         print(f"Stocks: {', '.join(stocks)}")
-        print(f"Strategy: MA({self.config['strategy']['indicators']['ma_short']}/"
-              f"{self.config['strategy']['indicators']['ma_long']}) + "
+        print(f"Strategy: Momentum Breakout")
+        print(f"  - Entry: Uptrend + RSI crossing {rsi_threshold}")
+        print(f"  - Exit: Trend reversal OR RSI < 50 OR Price < Long MA")
+        print(f"Indicators: MA({self.config['strategy']['indicators']['ma_short']}/"
+              f"{self.config['strategy']['indicators']['ma_long']}), "
               f"RSI({self.config['strategy']['indicators']['rsi_period']})")
         
         # Initialize trader
@@ -426,6 +515,14 @@ class MAStrategyRunner:
         print("\n" + "=" * 60)
         print("  Strategy Run Complete")
         print("=" * 60)
+        
+        # Summary of positions
+        active_positions = [stock for stock, pos in self.positions.items() if pos.get('in_position', False)]
+        if active_positions:
+            print(f"\n📊 Active Positions: {', '.join(active_positions)}")
+        else:
+            print(f"\n📊 No active positions")
+        
         print(f"\nData cached in: {self.cache_dir.absolute()}")
         print("Tip: Edit strategy_config.yaml to customize parameters")
 

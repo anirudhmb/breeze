@@ -1,5 +1,5 @@
 # MA + RSI Trading Strategy Configuration
-# Simple config-driven strategy for connectivity testing
+# Momentum-based breakout strategy for connectivity testing
 
 strategy:
   # Mode: 'trial' (prints signals only) or 'live' (executes real orders)
@@ -8,6 +8,7 @@ strategy:
   
   # List of stocks to trade
   # Add or remove stocks as needed
+  # Note: Can buy multiple stocks simultaneously
   stocks:
     - RELIANCE
     - TCS
@@ -20,9 +21,9 @@ strategy:
     ma_long: 20          # Long-term MA (slower)
     
     # RSI (Relative Strength Index) settings
-    rsi_period: 14       # Standard RSI period
-    rsi_overbought: 70   # Above this = overbought (sell signal)
-    rsi_oversold: 30     # Below this = oversold (buy signal)
+    rsi_period: 14       # Standard RSI period (14 days)
+    rsi_overbought: 70   # Overbought threshold (entry trigger)
+    rsi_oversold: 30     # Oversold threshold (not used in current logic)
   
   # Trading Parameters
   trading:
@@ -38,15 +39,28 @@ strategy:
     cache_enabled: true  # Enable local CSV caching
     cache_directory: data # Directory to store cached data
 
-# Signal Logic (for reference)
-# BUY Signal:
-#   - Short MA crosses above Long MA (bullish crossover)
-#   - AND RSI < overbought threshold (not overbought)
+# ============================================================================
+# STRATEGY LOGIC - Momentum Breakout (Long Only)
+# ============================================================================
 #
-# SELL Signal:
-#   - Short MA crosses below Long MA (bearish crossover)
-#   - OR RSI > overbought threshold (overbought condition)
+# LONG ENTRY (BUY) - All conditions must be true:
+#   1. Short MA > Long MA (uptrend confirmed)
+#   2. Previous RSI < rsi_overbought (e.g., < 70)
+#   3. Current RSI >= rsi_overbought (e.g., >= 70)
+#   → "Buy the breakout" - momentum accelerating into overbought zone
 #
-# HOLD Signal:
-#   - No clear crossover or neutral conditions
+# LONG EXIT (SELL) - Any one condition triggers exit:
+#   1. Short MA < Long MA (trend reversal/bearish crossover)
+#   2. (Previous RSI > 50) AND (Current RSI < 50) (momentum weakening)
+#   3. Current Close < Long MA (support broken)
+#   → Multiple safety nets for early exit
+#
+# POSITION TRACKING:
+#   - Only BUY if not already in position
+#   - Only SELL if currently in position
+#   - Can hold multiple stocks simultaneously
+#
+# HOLD:
+#   - No clear entry/exit signal
+# ============================================================================
 
