@@ -1,0 +1,266 @@
+================================================================================
+           BREEZE MA+RSI STRATEGY - DAILY OPERATIONS GUIDE
+================================================================================
+
+This guide will walk you through the daily steps to run and monitor your
+trading strategy on Windows.
+
+================================================================================
+                         ONE-TIME SETUP (First Day Only)
+================================================================================
+
+STEP 1: Open Command Prompt in Project Folder
+----------------------------------------------
+EASIEST METHOD (RECOMMENDED):
+1. Open File Explorer (Windows Key + E)
+2. Navigate to your breeze project folder
+3. Click on the address bar at the top (where the path is shown)
+4. Type: cmd
+5. Press Enter
+
+✓ Command Prompt opens directly in your project folder!
+   No need to use "cd" command!
+
+ALTERNATIVE METHODS:
+Method 1: In File Explorer, hold Shift + Right-click in empty space
+          → Select "Open PowerShell window here" or "Open command window here"
+
+Method 2: Press Windows Key + R → type "cmd" → Enter
+          Then navigate: cd C:\path\to\breeze
+
+Method 3: In File Explorer, click File menu → "Open command prompt"
+
+STEP 2: Login to Breeze (Create Session)
+-----------------------------------------
+Run:
+    python scripts\login.py
+
+Follow the prompts:
+- Enter your API Key
+- Enter your API Secret
+- Enter the OTP sent to your phone
+
+This creates a session that lasts 24 hours.
+
+STEP 3: Setup Task Scheduler (One-Time Only)
+---------------------------------------------
+Double-click: SETUP_TaskScheduler.bat
+
+This will:
+- Create a Windows scheduled task
+- Set it to run every 1 minute
+- Configure it for market hours
+
+You only need to do this ONCE.
+
+================================================================================
+                        DAILY OPERATIONS (Every Trading Day)
+================================================================================
+
+MORNING ROUTINE (Before Market Opens - Before 9:00 AM):
+--------------------------------------------------------
+
+1. Open Command Prompt in Project Folder
+   
+   EASIEST WAY:
+   - Open File Explorer (Windows Key + E)
+   - Go to your breeze project folder
+   - Click the address bar (where path is shown)
+   - Type: cmd
+   - Press Enter
+   
+   ✓ You're now in the correct folder automatically!
+
+2. Login to Breeze (Creates fresh session)
+   
+   python scripts\login.py
+   
+   Enter your credentials and OTP when prompted.
+   
+   ✓ You should see: "Login successful! Session token saved."
+
+3. Verify Strategy Configuration
+   
+   - Open: strategy_config.yaml
+   - Check mode: 'trial' (for testing) or 'live' (for real trading)
+   - Check stocks: TATINV, GODPRO (or your chosen stocks)
+   
+   IMPORTANT: Always start with 'trial' mode first!
+
+4. Start the Strategy
+   
+   Double-click: START_Strategy.bat
+   
+   You should see:
+   - Flag file created
+   - Strategy runs once immediately (test run)
+   - Message: "Strategy is now ACTIVE"
+   
+   The strategy will now run automatically every 1 minute via Task Scheduler.
+
+DURING MARKET HOURS (9:00 AM - 3:30 PM):
+-----------------------------------------
+
+The strategy runs automatically every minute. You can:
+
+1. Check Current Status
+   
+   Double-click: STATUS_Strategy.bat
+   
+   This shows:
+   - Is strategy running? (Active/Stopped)
+   - Last execution time
+   - Current open positions
+   - Recent P&L
+
+2. Monitor Logs (Optional)
+   
+   Open the logs folder:
+   - logs\signals_2025-10-26.csv  (Today's trading signals)
+   - logs\positions.txt           (Current holdings)
+   - logs\last_run.txt            (Last execution status)
+   
+   You can open signals CSV in Excel to see all trades.
+
+AFTERNOON ROUTINE (After Market Close - After 3:30 PM):
+--------------------------------------------------------
+
+1. Stop the Strategy
+   
+   Double-click: STOP_Strategy.bat
+   
+   You should see: "Strategy has been STOPPED"
+
+2. Review Today's Performance
+   
+   Open in Excel:
+   logs\signals_YYYY-MM-DD.csv
+   
+   Review:
+   - All BUY/SELL/SHORT/COVER signals
+   - Entry/Exit prices
+   - RSI and MA values at trade time
+   - Reasons for each trade
+
+3. Check Final Positions
+   
+   Open: logs\positions.txt
+   
+   This shows any positions you're still holding overnight.
+
+4. Review Full Log (If needed)
+   
+   Open: logs\full_YYYY-MM-DD.log
+   
+   Check for any errors or unusual behavior.
+
+5. Plan for Tomorrow
+   
+   - Based on today's performance, adjust strategy_config.yaml if needed
+   - Decide if you want to continue in 'trial' or switch to 'live'
+   - Note any stocks that performed well/poorly
+
+================================================================================
+                              COMMAND REFERENCE
+================================================================================
+
+Opening Command Prompt in Project Folder:
+------------------------------------------
+EASIEST: Open File Explorer → Go to breeze folder → 
+         Click address bar → Type "cmd" → Enter
+
+Alternative: Windows Key + R → type "cmd" → Enter → cd C:\path\to\breeze
+
+Login to Breeze:
+----------------
+python scripts\login.py
+
+Check Session Status:
+---------------------
+python scripts\session_status.py
+
+Test Connection:
+----------------
+python scripts\test_connection.py
+
+Run Strategy Once (Manual Test):
+---------------------------------
+python scripts\examples\ma_rsi_strategy.py
+
+View Strategy Config:
+---------------------
+notepad strategy_config.yaml
+
+View Today's Signals:
+---------------------
+notepad logs\signals_2025-10-26.csv
+(Replace date with today's date)
+
+================================================================================
+                          QUICK TROUBLESHOOTING
+================================================================================
+
+Problem: "Session not found" or "Invalid session"
+Solution: Run login again: python scripts\login.py
+
+Problem: "No data returned from API"
+Solution: 
+1. Check session: python scripts\session_status.py
+2. Verify stock symbols in strategy_config.yaml
+3. Check date range (days_to_fetch: 30 or less)
+
+Problem: Strategy not executing automatically
+Solution:
+1. Check if flag exists: dir breeze_RUNNING.flag
+2. Check Task Scheduler: Open Task Scheduler → look for "BreezeStrategy"
+3. Restart: Run STOP_Strategy.bat, then START_Strategy.bat
+
+Problem: Can't open Command Prompt in project directory
+Solution (EASIEST):
+1. Open breeze project folder in File Explorer
+2. Click the address bar at the top (where the path shows)
+3. Type "cmd" and press Enter
+4. ✓ Command Prompt opens in the correct folder automatically!
+
+Problem: Python not found
+Solution: Activate virtual environment first:
+    venv\Scripts\activate
+
+================================================================================
+                         SAFETY REMINDERS
+================================================================================
+
+✓ ALWAYS start with mode: 'trial' when testing new settings
+✓ ALWAYS login fresh every morning (session expires in 24 hours)
+✓ ALWAYS review signals CSV at end of day
+✓ ALWAYS stop the strategy after market hours
+✓ NEVER run in 'live' mode without testing in 'trial' first
+✓ NEVER leave strategy running unmonitored for days
+
+================================================================================
+                         DAILY CHECKLIST
+================================================================================
+
+[ ] Morning: Login to Breeze (python scripts\login.py)
+[ ] Morning: Check strategy_config.yaml (mode and stocks)
+[ ] Morning: Start strategy (START_Strategy.bat)
+[ ] During day: Check status occasionally (STATUS_Strategy.bat)
+[ ] Evening: Stop strategy (STOP_Strategy.bat)
+[ ] Evening: Review signals CSV in logs folder
+[ ] Evening: Check positions.txt for overnight holdings
+[ ] Evening: Plan adjustments for tomorrow
+
+================================================================================
+                           NEED HELP?
+================================================================================
+
+Check these files:
+- TROUBLESHOOTING.md         (General troubleshooting)
+- TROUBLESHOOTING_STRATEGY.md (Strategy-specific issues)
+- README.md                  (Project overview)
+- docs/SETUP_GUIDE.md        (Detailed setup instructions)
+
+================================================================================
+                        HAPPY TRADING! 📈
+================================================================================
+

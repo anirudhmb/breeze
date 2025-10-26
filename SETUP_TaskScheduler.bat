@@ -12,11 +12,12 @@ echo.
 
 REM Get current directory
 set SCRIPT_DIR=%~dp0
-set WRAPPER_SCRIPT=%SCRIPT_DIR%RUN_Strategy_Internal.bat
+set WRAPPER_SCRIPT=%SCRIPT_DIR%RUN_Strategy_Silent.vbs
 
 echo This will create a Windows Task Scheduler job that:
 echo   - Runs every 1 minute
 echo   - Starts at 9:00 AM daily
+echo   - Runs SILENTLY (no flashing windows)
 echo.
 echo Wrapper script: %WRAPPER_SCRIPT%
 echo.
@@ -47,8 +48,8 @@ echo Creating Task Scheduler job...
 echo.
 
 REM Create the scheduled task
-REM Using wrapper script to avoid && escaping issues
-schtasks /Create /TN "BreezeStrategy" /TR "\"%WRAPPER_SCRIPT%\"" /SC MINUTE /MO 1 /ST 09:00 /F
+REM Using VBScript wrapper to run silently without flashing windows
+schtasks /Create /TN "BreezeStrategy" /TR "wscript.exe \"%WRAPPER_SCRIPT%\"" /SC MINUTE /MO 1 /ST 09:00 /F
 
 if %ERRORLEVEL% EQU 0 (
     echo.
@@ -59,12 +60,14 @@ if %ERRORLEVEL% EQU 0 (
     echo Task Name: BreezeStrategy
     echo Frequency: Every 1 minute
     echo Start Time: 9:00 AM daily
+    echo Mode: SILENT (no flashing windows)
     echo.
     echo IMPORTANT NOTES:
     echo 1. The task is created but strategy is NOT running yet
     echo 2. You must run START_Strategy.bat to enable it
-    echo 3. The task will run every minute checking for the flag
-    echo 4. Use STOP_Strategy.bat to disable
+    echo 3. The task runs silently every minute checking for the flag
+    echo 4. NO MORE FLASHING WINDOWS!
+    echo 5. Use STOP_Strategy.bat to disable
     echo.
     echo ============================================
     echo   Next Step: Double-click START_Strategy.bat
