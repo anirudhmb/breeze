@@ -1,0 +1,19 @@
+# Breeze Trading Client - Core Dependencies
+# Python 3.8+
+
+# Official ICICI Direct Breeze SDK
+breeze-connect>=1.0.39
+
+# Configuration management
+pyyaml>=6.0.1
+
+# Environment variable management
+python-dotenv>=1.0.0
+
+# Optional but recommended
+# Uncomment if you need these features:
+
+pandas>=2.0.0              # For data analysis and backtesting
+numpy>=1.24.0              # For numerical operations
+# pyotp>=2.8.0               # For TOTP-based OTP automation (use with caution)
+

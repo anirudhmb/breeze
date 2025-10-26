@@ -1,0 +1,117 @@
+# Breeze Trading Client - Configuration File
+# Copy this file to config.yaml and customize as needed
+# For security, use environment variables for sensitive data (see .env.example)
+
+# API Credentials
+# Recommended: Use environment variables (${BREEZE_API_KEY})
+# Alternative: Put values directly here (less secure)
+credentials:
+  api_key: "${BREEZE_API_KEY}"
+  secret_key: "${BREEZE_SECRET_KEY}"
+  user_id: "${BREEZE_USER_ID}"
+
+# Trading Defaults
+# These are used as defaults when parameters are not specified
+trading:
+  # Default exchange for orders
+  # Options: NSE, BSE, NFO (Futures & Options), MCX, NDX
+  default_exchange: "NSE"
+  
+  # Default product type
+  # Options: cash, margin, futures, options, optionplus, btst
+  default_product: "cash"
+  
+  # Require confirmation before placing orders
+  # Set to true for safety, false for automated strategies
+  confirm_orders: false
+  
+  # Paper trading mode (simulated orders, no real execution)
+  # WARNING: Not fully implemented in v1.0
+  paper_trading: false
+
+# Session Management
+session:
+  # Automatically save session token after login
+  auto_save: true
+  
+  # Check session validity before each API call
+  check_validity: true
+  
+  # Warn before session expiry (in minutes)
+  warn_before_expiry_minutes: 60
+
+# Notifications & Alerts
+notifications:
+  # Show confirmation messages after order placement
+  show_order_confirmations: true
+  
+  # Alert when session is about to expire
+  alert_on_session_expiry: true
+  
+  # Log all trades to CSV file
+  log_trades: true
+  
+  # Trade log file pattern (date will be inserted)
+  trade_log_pattern: "trades_{date}.csv"
+
+# Advanced Settings
+advanced:
+  # Enable rate limiting protection
+  # ICICI limits: 100 calls/min, 5000 calls/day
+  rate_limit_enabled: true
+  
+  # Maximum API retries on failure
+  max_retries: 3
+  
+  # API timeout in seconds
+  timeout_seconds: 30
+  
+  # Enable detailed debug logging
+  debug_mode: false
+  
+  # Validate parameters before sending to API
+  # Set to false if you want direct SDK behavior
+  validate_parameters: true
+
+# Logging Configuration
+logging:
+  # Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  level: "INFO"
+  
+  # Log to file
+  log_to_file: true
+  
+  # Log file name
+  log_file: "breeze_trader.log"
+  
+  # Log format
+  format: "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+  
+  # Date format
+  date_format: "%Y-%m-%d %H:%M:%S"
+
+# WebSocket Settings (for live streaming)
+websocket:
+  # Automatically reconnect on disconnection
+  auto_reconnect: true
+  
+  # Maximum reconnection attempts
+  max_reconnect_attempts: 5
+  
+  # Reconnection delay in seconds
+  reconnect_delay: 5
+
+# Risk Management (Optional - for future implementation)
+risk_management:
+  # Enable risk checks (not fully implemented in v1.0)
+  enabled: false
+  
+  # Maximum order size (quantity)
+  max_order_size: 1000
+  
+  # Maximum order value (in INR)
+  max_order_value: 100000
+  
+  # Maximum daily loss limit (in INR)
+  daily_loss_limit: 50000
+

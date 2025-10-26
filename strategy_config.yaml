@@ -1,0 +1,52 @@
+# MA + RSI Trading Strategy Configuration
+# Simple config-driven strategy for connectivity testing
+
+strategy:
+  # Mode: 'trial' (prints signals only) or 'live' (executes real orders)
+  # IMPORTANT: Start with 'trial' to test connectivity without risk
+  mode: trial
+  
+  # List of stocks to trade
+  # Add or remove stocks as needed
+  stocks:
+    - RELIANCE
+    - TCS
+    - INFY
+  
+  # Technical Indicator Parameters
+  indicators:
+    # Moving Average periods (in days)
+    ma_short: 5          # Short-term MA (faster)
+    ma_long: 20          # Long-term MA (slower)
+    
+    # RSI (Relative Strength Index) settings
+    rsi_period: 14       # Standard RSI period
+    rsi_overbought: 70   # Above this = overbought (sell signal)
+    rsi_oversold: 30     # Below this = oversold (buy signal)
+  
+  # Trading Parameters
+  trading:
+    quantity: 10         # Fixed quantity per trade
+    exchange: NSE        # Exchange code (NSE, BSE, etc.)
+    product: cash        # Product type (cash, margin, etc.)
+    order_type: market   # Order type (market or limit)
+  
+  # Historical Data Settings
+  data:
+    days_to_fetch: 30    # Number of days of historical data
+    interval: 1day       # Candle interval (1day, 1minute, 5minute, etc.)
+    cache_enabled: true  # Enable local CSV caching
+    cache_directory: data # Directory to store cached data
+
+# Signal Logic (for reference)
+# BUY Signal:
+#   - Short MA crosses above Long MA (bullish crossover)
+#   - AND RSI < overbought threshold (not overbought)
+#
+# SELL Signal:
+#   - Short MA crosses below Long MA (bearish crossover)
+#   - OR RSI > overbought threshold (overbought condition)
+#
+# HOLD Signal:
+#   - No clear crossover or neutral conditions
+
