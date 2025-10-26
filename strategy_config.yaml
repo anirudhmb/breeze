@@ -21,8 +21,13 @@ strategy:
     
     # RSI (Relative Strength Index) settings
     rsi_period: 14       # Standard RSI period (14 days)
-    rsi_overbought: 70   # Overbought threshold (entry trigger)
-    rsi_oversold: 30     # Oversold threshold (not used in current logic)
+    
+    # LONG position thresholds
+    rsi_long_entry: 70   # RSI crosses above this = LONG entry (momentum breakout)
+    
+    # SHORT position thresholds
+    rsi_short_entry: 40  # RSI crosses below this = SHORT entry (momentum breakdown)
+    rsi_short_exit: 60   # RSI crosses above this = SHORT exit (momentum recovery)
   
   # Trading Parameters
   trading:
@@ -39,13 +44,13 @@ strategy:
     cache_directory: data # Directory to store cached data
 
 # ============================================================================
-# STRATEGY LOGIC - Momentum Breakout (Long Only)
+# STRATEGY LOGIC - Momentum Breakout/Breakdown (Long & Short)
 # ============================================================================
 #
 # LONG ENTRY (BUY) - All conditions must be true:
 #   1. Short MA > Long MA (uptrend confirmed)
-#   2. Previous RSI < rsi_overbought (e.g., < 70)
-#   3. Current RSI >= rsi_overbought (e.g., >= 70)
+#   2. Previous RSI < rsi_long_entry (e.g., < 70)
+#   3. Current RSI >= rsi_long_entry (e.g., >= 70)
 #   → "Buy the breakout" - momentum accelerating into overbought zone
 #
 # LONG EXIT (SELL) - Any one condition triggers exit:
@@ -54,10 +59,23 @@ strategy:
 #   3. Current Close < Long MA (support broken)
 #   → Multiple safety nets for early exit
 #
+# SHORT ENTRY (SHORT SELL) - All conditions must be true:
+#   1. Short MA < Long MA (downtrend confirmed)
+#   2. Previous RSI > rsi_short_entry (e.g., > 40)
+#   3. Current RSI < rsi_short_entry (e.g., < 40)
+#   → "Sell the breakdown" - momentum breaking down below 40
+#
+# SHORT EXIT (BUY TO COVER) - Any one condition triggers exit:
+#   1. Short MA > Long MA (trend reversal/bullish crossover)
+#   2. (Previous RSI < rsi_short_exit) AND (Current RSI > rsi_short_exit) (momentum recovering)
+#   3. Current Close > Long MA (resistance broken)
+#   → Multiple safety nets for covering shorts
+#
 # POSITION TRACKING:
-#   - Only BUY if not already in position
-#   - Only SELL if currently in position
-#   - Can hold multiple stocks simultaneously
+#   - Only enter LONG if not in any position
+#   - Only enter SHORT if not in any position
+#   - Only exit if currently in that position type
+#   - Can hold multiple stocks simultaneously (each can be LONG or SHORT)
 #
 # HOLD:
 #   - No clear entry/exit signal
