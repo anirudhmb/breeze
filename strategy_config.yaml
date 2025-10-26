@@ -10,8 +10,8 @@ strategy:
   # Add or remove stocks as needed
   # Note: Can buy multiple stocks simultaneously
   stocks:
-    - TATAINV
-    - GODREJPROP
+    - TATINV
+    - GODPRO
   
   # Technical Indicator Parameters
   indicators:
